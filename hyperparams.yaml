@@ -1,0 +1,183 @@
+
+
+# Define the vocabulary size
+vocab_size: 70
+blank_index: 0  # For padding
+
+
+# Training hyperparameters
+number_of_epochs: 10
+batch_size: 8
+learning_rate: 0.0001
+
+weight_decay: 0.000001
+betas: [0.9, 0.98]
+
+
+lexicon:
+  - AA
+  - AE
+  - AH
+  - AO
+  - AW
+  - AY
+  - B
+  - CH
+  - D
+  - DH
+  - EH
+  - ER
+  - EY
+  - F
+  - G
+  - HH
+  - IH
+  - IY
+  - JH
+  - K
+  - L
+  - M
+  - N
+  - NG
+  - OW
+  - OY
+  - P
+  - R
+  - S
+  - SH
+  - T
+  - TH
+  - UH
+  - UW
+  - V
+  - W
+  - Y
+  - Z
+  - ZH
+  - ' '
+
+
+# Model hyperparameters
+d_model: 512
+nhead: 8
+num_encoder_layers: 6
+num_decoder_layers: 6
+dim_feedforward: 2048
+dropout: 0.1
+
+sample_rate: 22050
+hop_length: 256
+win_length: null
+n_mel_channels: 80
+n_fft: 1024
+mel_fmin: 0.0
+mel_fmax: 8000.0
+power: 1
+norm: "slaney"
+mel_scale: "slaney"
+dynamic_range_compression: True
+mel_normalized: False
+min_max_energy_norm: True
+min_f0: 65  #(torchaudio pyin values)
+max_f0: 2093 #(torchaudio pyin values)
+
+
+# Epoch counter
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+# Transformer model
+Seq2SeqTransformer: !new:torch.nn.Transformer
+    d_model: !ref <d_model>
+    nhead: !ref <nhead>
+    num_encoder_layers: !ref <num_encoder_layers>
+    num_decoder_layers: !ref <num_decoder_layers>
+    dim_feedforward: !ref <dim_feedforward>
+    dropout: !ref <dropout>
+    batch_first: True
+
+# Embeddings
+encoder_emb: !new:torch.nn.Embedding
+    num_embeddings: !ref <vocab_size>
+    embedding_dim: !ref <d_model>
+    padding_idx: !ref <blank_index>
+
+decoder_emb: !new:torch.nn.Embedding
+    num_embeddings: !ref <vocab_size>
+    embedding_dim: !ref <d_model>
+    padding_idx: !ref <blank_index>
+
+# Positional embeddings and custom prenets
+pos_emb: !new:custom_model.ScaledPositionalEncoding
+    d_model: !ref <d_model>
+    max_len: 5000
+
+encoder_prenet: !new:custom_model.EncoderPrenet
+    embedding_dim: !ref <d_model>
+    num_channels: 512
+    kernel_size: 5
+    dropout_rate: 0.5
+
+decoder_prenet: !new:custom_model.DecoderPrenet
+    input_dim: 80  # Number of mel channels
+    hidden_dim: 256
+    output_dim: !ref <d_model>
+    final_dim: !ref <d_model>
+    dropout_rate: 0.5
+
+# Tacotron2 specific modules from SpeechBrain
+postnet: !new:speechbrain.lobes.models.Tacotron2.Postnet
+
+mel_spectogram: !name:speechbrain.lobes.models.FastSpeech2.mel_spectogram
+    sample_rate: !ref <sample_rate>
+    hop_length: !ref <hop_length>
+    win_length: !ref <win_length>
+    n_fft: !ref <n_fft>
+    n_mels: !ref <n_mel_channels>
+    f_min: !ref <mel_fmin>
+    f_max: !ref <mel_fmax>
+    power: !ref <power>
+    normalized: !ref <mel_normalized>
+    min_max_energy_norm: !ref <min_max_energy_norm>
+    norm: !ref <norm>
+    mel_scale: !ref <mel_scale>
+    compression: !ref <dynamic_range_compression>
+
+
+mel_linear: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <d_model>
+    n_neurons: 80  # Number of mel channels
+
+stop_linear: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <d_model>
+    n_neurons: 1
+
+input_encoder: !new:speechbrain.dataio.encoder.TextEncoder
+
+# Masks
+lookahead_mask: !name:speechbrain.lobes.models.transformer.Transformer.get_lookahead_mask
+padding_mask: !name:speechbrain.lobes.models.transformer.Transformer.get_key_padding_mask
+
+
+modules:
+    Seq2SeqTransformer: !ref <Seq2SeqTransformer>
+    encoder_emb: !ref <encoder_emb>
+    decoder_emb: !ref <decoder_emb>
+    pos_emb: !ref <pos_emb>
+    encoder_prenet: !ref <encoder_prenet>
+    decoder_prenet: !ref <decoder_prenet>
+    postnet: !ref <postnet>
+    mel_linear: !ref <mel_linear>
+    stop_linear: !ref <stop_linear>
+
+model: !new:torch.nn.ModuleList.
+    - [!ref <Seq2SeqTransformer>, !ref <encoder_emb>, !ref <decoder_emb>, !ref <pos_emb>, !ref <encoder_prenet>, !ref <decoder_prenet>, !ref <postnet>, !ref <mel_linear>, !ref <stop_linear>]
+
+
+
+pretrainer: !new:speechbrain.utils.parameter_transfer.Pretrainer
+    loadables:
+        model: !ref <model>
+        input_encoder: !ref <input_encoder>
+    
+
